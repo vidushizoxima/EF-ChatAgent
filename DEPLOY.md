@@ -1,9 +1,14 @@
 # Deploying the EF Social Chat Agent to Azure App Service
 
-`.github/workflows/deploy.yml` builds the `Dockerfile`, pushes it to GHCR, and repoints
-the App Service at the new SHA-tagged image on every push to `main`.
+`.github/workflows/deploy.yml` zip-deploys the source to the App Service on every push
+to `main`. The App Service builds it: `SCM_DO_BUILD_DURING_DEPLOYMENT=true` makes Oryx
+run `pip install -r requirements.txt` server-side.
 
-Repo: `vidushizoxima/EF-ChatAgent` → image `ghcr.io/vidushizoxima/ef-chatagent`
+**This is a code deploy, not a container deploy.** The `Dockerfile` in this repo is for
+running the app locally — nothing in the deploy path reads it, and no image is pushed
+to a registry.
+
+Repo: `vidushizoxima/EF-ChatAgent`
 
 ---
 
@@ -30,19 +35,19 @@ is what `AZURE_WEBAPP_NAME` in `deploy.yml` must say; there is no `ef-chat-agent
 ```bash
 RG=Eureka-forbes-demo
 APP=EurekaForbes-Chat             # must match AZURE_WEBAPP_NAME in deploy.yml
-IMG=ghcr.io/vidushizoxima/ef-chatagent:latest
 ```
 
-It was originally created as a Python *code* app, so it had to be switched to a
-container app before `azure/webapps-deploy` could push an image to it:
+The runtime stack and startup command it must be on:
 
 ```bash
-az webapp config container set -n $APP -g $RG \
-  --container-image-name $IMG --container-registry-url https://ghcr.io
-
-# the Dockerfile CMD runs the app; a leftover startup command would shadow it
-az webapp config set -n $APP -g $RG --generic-configurations '{"appCommandLine": ""}'
+az webapp config set -n $APP -g $RG \
+  --linux-fx-version "PYTHON|3.11" \
+  --startup-file "python chatbot/main.py"
 ```
+
+`chatbot/main.py` binds `0.0.0.0` on `$PORT`, which App Service sets for the worker.
+Do **not** set `WEBSITES_PORT` — that is a custom-container setting and does nothing
+for a code app.
 
 To create one from scratch instead:
 
@@ -53,7 +58,7 @@ LOC=southindia
 az group create -n $RG -l $LOC
 # B1 is enough — one instance, no fleet of subprocesses. Always On needs B1+, not F1.
 az appservice plan create -n $PLAN -g $RG --is-linux --sku B1 -l $LOC
-az webapp create -n $APP -g $RG -p $PLAN --container-image-name $IMG
+az webapp create -n $APP -g $RG -p $PLAN --runtime "PYTHON:3.11"
 ```
 
 The workflow does not need the hostname — it reads it back from the deploy action, so
@@ -63,18 +68,19 @@ the randomised suffix new App Services get is handled on its own. To see it your
 az webapp show -n $APP -g $RG --query defaultHostName -o tsv
 ```
 
-## 2. Let App Service pull from GHCR
+## 2. Let App Service build the source
 
-The package is private until you change it. Either make it public after the first
-workflow run (`https://github.com/users/vidushizoxima/packages/container/ef-chatagent/settings`
-→ *Change visibility*), or hand App Service a read-only PAT:
+The workflow ships source only — no wheels, no venv. Oryx installs
+`requirements.txt` on the App Service, which requires:
 
 ```bash
 az webapp config appsettings set -n $APP -g $RG --settings \
-  DOCKER_REGISTRY_SERVER_URL=https://ghcr.io \
-  DOCKER_REGISTRY_SERVER_USERNAME=vidushizoxima \
-  DOCKER_REGISTRY_SERVER_PASSWORD=<ghcr-read-packages-PAT>
+  SCM_DO_BUILD_DURING_DEPLOYMENT=true
 ```
+
+Without it the zip is dropped on disk unbuilt, `import fastapi` fails at startup, and
+the site 503s with nothing useful in the HTTP response — the reason is in
+`az webapp log tail` only.
 
 ## 3. App settings
 
@@ -96,9 +102,8 @@ The settings that are not optional:
 
 | Setting | Why |
 |---|---|
-| `WEBSITES_PORT=8000` | the container listens on 8000; without this App Service probes :80 and 504s |
-| `WEBSITES_ENABLE_APP_SERVICE_STORAGE=true` | mounts persistent `/home` — **without it every redeploy wipes all sessions** |
-| `EF_DB_PATH=/home/data/ef_chat.db` | keeps the SQLite file on that persistent mount |
+| `SCM_DO_BUILD_DURING_DEPLOYMENT=true` | Oryx installs `requirements.txt`; without it the app starts with no dependencies |
+| `EF_DB_PATH=/home/data/ef_chat.db` | `/home` is the only path that survives a redeploy on a code app, so the SQLite file lives there |
 | `ADMIN_API_KEY` | `/admin/*` and `/session/*` are public routes otherwise refused — set a long random value |
 
 ## 4. Always On, health check, single instance
@@ -129,8 +134,9 @@ git commit -m "Deploy to Azure App Service"
 git push origin main
 ```
 
-The push triggers the workflow: build → GHCR → deploy → poll `/health` until it
-returns 200 → warn if Dataverse or the channel credentials did not come through.
+The push triggers the workflow: compile-check → stage → zip-deploy → poll `/health`
+until it returns 200 → warn if Dataverse or the channel credentials did not come
+through.
 
 ## 6. Point Meta at the new host
 
@@ -166,9 +172,10 @@ rather than failing the deploy.
 
 | Symptom | Cause |
 |---|---|
-| 504 on every request | `WEBSITES_PORT` missing or not 8000 |
-| Container never starts | GHCR package still private and no PAT set |
-| Sessions reset on every deploy | `WEBSITES_ENABLE_APP_SERVICE_STORAGE` not true, or `EF_DB_PATH` not under `/home` |
+| 503 on every request, `ModuleNotFoundError` in the log | `SCM_DO_BUILD_DURING_DEPLOYMENT` not true — the zip shipped but was never built |
+| 503 with nothing obvious | startup command is not `python chatbot/main.py`, or the app bound a port other than `$PORT` |
+| Deploy green, old behaviour still served | the previous worker answered the health poll before the new one swapped in; re-check `/health` a minute later |
+| Sessions reset on every deploy | `EF_DB_PATH` not under `/home` — only `/home` survives a redeploy |
 | Interactions never reach the CRM | Always On disabled, so the background logger is not running |
 | Customers answered twice | more than one instance — SQLite state is per-instance |
 | Health check passes but replies never send | channel token missing; check `/health` |

@@ -1,13 +1,17 @@
 name: Build & Deploy to Azure App Service
 
-# Every push to main builds the Dockerfile, publishes it to GHCR, and repoints the
-# App Service at the new SHA-tagged image.
+# Every push to main zip-deploys the source to the App Service, which builds it
+# server-side (Oryx runs pip install from requirements.txt because
+# SCM_DO_BUILD_DURING_DEPLOYMENT=true on the app).
 #
-# Two things about this app differ from a stateless API and are enforced below:
-#   · session state is a SQLite file, so it must live on /home (persistent) and the
-#     app must run on exactly ONE instance
+# This is a CODE deploy, not a container deploy. The Dockerfile is kept for
+# running the app locally and is not used here.
+#
+# Two things about this app differ from a stateless API and are enforced on the
+# App Service itself, not by this workflow — see DEPLOY.md:
+#   · session state is a SQLite file under /home, so the app must run on
+#     exactly ONE instance
 #   · the interaction logger is a background task, so Always On must stay enabled
-# Neither is set by this workflow — see DEPLOY.md for the one-time az commands.
 
 on:
   push:
@@ -22,70 +26,54 @@ env:
   # ── EDIT THIS ─────────────────────────────────────────────────────
   AZURE_WEBAPP_NAME: EurekaForbes-Chat
   # ──────────────────────────────────────────────────────────────────
-  # The hostname is NOT hard-coded: new App Services get a randomised suffix, so
-  # it is read from the deploy action's own output below.
+  # The hostname is NOT hard-coded: App Services get a randomised suffix, so it
+  # is read from the deploy action's own output below.
   AZURE_HEALTH_PATH: /health
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  PYTHON_VERSION: '3.11'
 
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build & push image
+  deploy:
+    name: Deploy to App Service
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
-    outputs:
-      image: ${{ steps.meta.outputs.image }}
-    steps:
-      - uses: actions/checkout@v4
-
-      # GHCR rejects uppercase paths; repo names often have capitals.
-      - name: Resolve lowercase image path
-        id: meta
-        run: echo "image=${REGISTRY}/${IMAGE_NAME,,}" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build & push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          provenance: false          # App Service pulls plain manifests, not attestation indexes
-          tags: |
-            ${{ steps.meta.outputs.image }}:latest
-            ${{ steps.meta.outputs.image }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  deploy:
-    name: Deploy to App Service
-    needs: build
-    runs-on: ubuntu-latest
     environment:
       name: production
       url: ${{ steps.deploy.outputs.webapp-url }}
     steps:
-      - name: Deploy container
+      - uses: actions/checkout@v5
+
+      # Not used to build the deployment payload — Oryx does that on the App
+      # Service. This only compiles the sources so a syntax error fails here
+      # rather than at container start, where it shows up as an opaque 503.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Byte-compile sources
+        run: python -m compileall -q chatbot
+
+      # tests/ and the local venv are excluded from the payload; everything else
+      # tracked in the repo ships, including prompts/ and knowledge/.
+      - name: Stage deployment package
+        run: |
+          mkdir -p /tmp/pkg
+          rsync -a --exclude '.git' --exclude '.github' --exclude 'tests' \
+                --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
+                ./ /tmp/pkg/
+          echo "staged $(find /tmp/pkg -type f | wc -l) files"
+
+      - name: Deploy
         id: deploy
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          images: ${{ needs.build.outputs.image }}:${{ github.sha }}
+          package: /tmp/pkg
 
       # A hand-copied hostname goes stale the moment the app is recreated, and the
       # health gate then fails against a host that no longer exists. Take it from the
@@ -100,13 +88,16 @@ jobs:
           echo "health=${base}${AZURE_HEALTH_PATH}" >> "$GITHUB_OUTPUT"
           echo "Health URL: ${base}${AZURE_HEALTH_PATH}"
 
-      # A container cold start takes a while; poll instead of trusting the
-      # control plane's response.
+      # An Oryx build plus a cold start takes a while, and the OLD worker keeps
+      # answering 200 while it happens — so a plain poll can go green against the
+      # build we just replaced. Wait for the site to actually go down or change
+      # before believing any 200.
       - name: Wait for /health
         env:
           HEALTH_URL: ${{ steps.url.outputs.health }}
         run: |
-          for i in $(seq 1 30); do
+          sleep 30
+          for i in $(seq 1 40); do
             code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$HEALTH_URL" || echo 000)
             echo "attempt $i -> $code"
             if [ "$code" = "200" ]; then
