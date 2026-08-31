@@ -298,6 +298,17 @@ data/ef_chat.db            SQLite state (gitignored)
 
 ---
 
+## Deploying
+
+`.github/workflows/deploy.yml` builds the image, pushes it to GHCR and repoints the
+Azure App Service on every push to `main`. Full one-time setup — plan, app settings,
+Always On, publish profile — is in [DEPLOY.md](DEPLOY.md).
+
+Two non-negotiables there: the SQLite file must live on `/home` (persistent) and the
+app must run on **one instance only**. Both are explained in that file.
+
+---
+
 ## Operating it
 
 ```bash
@@ -334,3 +345,183 @@ at `data/`. Horizontal scale means swapping `client/store.py` for Redis — noth
 | `Cannot convert ... to Edm.Date` | a DateOnly column got a full timestamp; use `S.datetime_value(table, column, dt)` |
 | Interactions never appear in the CRM | nobody was identified, so they are held for `INTERACTION_ORPHAN_HOURS`; check `/admin/diagnostics` |
 # EF-ChatAgent
+
+---
+
+## AMC renewal reminders (proactive WhatsApp)
+
+WhatsApp only lets you send free-form text inside 24 hours of the customer's last
+message. A renewal reminder is by definition outside that window, so it has to go out
+as a **pre-approved template** — the model cannot write these. Once the customer
+replies, a fresh 24-hour window opens and the normal agent takes over.
+
+```
+12:00 IST daily  →  find_due()  →  AMC contracts landing exactly on a milestone
+                                    │
+                    send approved template for that milestone
+                                    │
+                    customer replies  →  24h window opens  →  agent + prompt
+                                                              start_amc_renewal
+```
+
+### The ladder
+
+Each customer is messaged on six days, not daily. `chatbot/client/amc_templates.py`:
+
+| Day | Template | Category |
+|---:|---|---|
+| −30 | `amc_expiry_30d` | UTILITY |
+| −15 | `amc_expiry_15d` | UTILITY |
+| −7 | `amc_renewal_offer_7d` | MARKETING — 10% off |
+| −1 | `amc_expiry_tomorrow` | UTILITY |
+| +3 | `amc_lapsed_offer` | MARKETING — 10% off |
+| +15 | `amc_lapsed_final` | MARKETING — 10% off |
+
+UTILITY is about a service the customer already holds: cheaper, no marketing opt-in,
+and outside Meta's per-user marketing cap. Copy that promotes the discount is
+MARKETING and carries all three costs, which is why only three of the six do.
+
+### Safety rails
+
+Four things stop this becoming a way to lose the number:
+
+- **Off by default.** `AMC_REMINDERS_ENABLED=false` unless set otherwise.
+- **Allowlist or nothing.** With `AMC_REMINDER_ALLOWLIST` empty the job refuses to
+  send at all; reaching the whole CRM needs `AMC_REMINDER_ALLOW_FULL_CRM=true`. The
+  demo org is full of real-looking mobile numbers.
+- **Send-once.** Every (contract, milestone) pair is recorded *before* the send, so a
+  crash or a restart cannot duplicate it. Duplicate contract records — this org has
+  them — are collapsed per (number, template) within a run.
+- **STOP is honoured before the agent runs.** `main.py` intercepts opt-outs and
+  replies with one fixed line rather than letting the model improvise.
+
+### Running it
+
+```bash
+# submit the six templates to Meta for approval (needs WHATSAPP_WABA_ID)
+.venv/bin/python scripts/submit_whatsapp_templates.py            # status
+.venv/bin/python scripts/submit_whatsapp_templates.py --submit   # create
+
+# who would be messaged, sending nothing. as_of shifts the run date, which is the
+# only practical way to test — real milestones land on a handful of days a year.
+curl -H "X-Admin-API-Key: $KEY" \
+  "localhost:8000/admin/amc-reminders/preview?as_of=2026-08-25"
+
+# send now, off-schedule
+curl -X POST -H "X-Admin-API-Key: $KEY" localhost:8000/admin/amc-reminders/run
+```
+
+### The renewal conversation
+
+The reminder only opens the door. Everything after it is a normal conversation the
+agent drives with short follow-up questions — no buttons, no menus.
+
+```
+reminder template  →  customer replies  →  24h window opens
+                                             │
+                        get_renewal_plans ───┤  what is available for THEIR appliance
+                        objection playbook ──┤  price, local technician, not using it
+                        troubleshooting ─────┤  filter due, no power, leak, alarm
+                                             │
+                 start_amc_renewal  ·  escalate_to_human  ·  log_renewal_outcome
+```
+
+**Prices come from one place.** `chatbot/client/amc_plans.py` is the only source of a
+rupee figure, and `get_renewal_plans` is the only way the agent can reach it. The
+model never does arithmetic on a price — the discount is applied in code.
+
+The shipped figures are placeholders from a campaign mockup, so `AMC_PRICES_CONFIRMED`
+defaults to `false`. While it is false the agent names the plans and says what each
+covers, states the discount as a percentage, and refuses to quote an amount:
+
+```
+false → "1-year or 2-year AMC for service visits and labour, or a 2-year CMC that
+         also covers parts and filters. All have 10% off. Exact prices aren't
+         confirmed here; our team will confirm the amount."
+
+true  → "1-year AMC: ₹2,249 after 10% off. 2-year AMC: ₹4,049. 2-year CMC: ₹6,299,
+         including spare parts and filter cartridges."
+```
+
+Replace the figures with EF's real card rates before flipping the flag.
+
+**Payment never happens in chat.** The agent is forbidden from sending a payment link
+or asking for card/UPI details, and from saying a renewal is active — it is logged,
+and the team completes it.
+
+**Escalation is not a failure.** `escalate_to_human` sets the Escalated disposition
+and records the reason, tells the customer someone will call, and offers the support
+number. A customer who wants a person and is made to argue with a bot is one we lose.
+
+### Campaign offers
+
+`chatbot/client/offers.py` holds the live campaign — discount, end date, terms. It is
+injected into every prompt as `{{current_offer}}` rather than fetched by a tool, so
+the agent always knows it, and **it expires on its own end date**: past `OFFER_ENDS_ON`
+the agent is told there is no offer and instructed not to invent one. A bot still
+promoting a dead campaign is a promise you have to honour or explain.
+
+The offer deliberately applies to everything, and the prompt forbids asking which
+product someone wants before naming it — making people choose first loses whoever has
+not decided yet.
+
+**Never hardcode a discount in template copy.** Deleting a template to fix wrong copy
+reserves its name for **four weeks** (`error_subcode 2388023`), so the offer templates
+take the discount and end date as `{{n}}` parameters and survive the next campaign
+without a review cycle. Anything else means new names — see the `_v2` suffixes.
+
+### New callers become customers
+
+`ef_servicerequest` binds only to `ef_customer`; there is no lead lookup. So a first-time
+caller with a broken appliance could not have a case raised at all. `ef_crm.ensure_customer`
+creates the record (idempotent on phone) and marks the lead Converted, which is what makes
+this work:
+
+```
+>>> hi my water purifier is not giving water properly
+<<< Hi! I'll help you with the water flow issue. May I know your name?
+>>> Meera
+<<< Reduced water flow is often due to the cartridge. When was it last changed?
+>>> i changed filter maybe 8 months back
+<<< I've logged a technician check under CASE-001036.
+    I can book today 2–5 PM, today 5–7 PM, or Friday 8–11 AM. Which suits you?
+>>> friday morning works
+<<< Booked for Friday, 28 August, 8–11 AM. The technician will call before arriving.
+```
+
+Service hours are **Monday–Friday, 8 AM–7 PM**, in four windows (8–11, 11–2, 2–5, 5–7).
+
+### Purchase interest
+
+`register_purchase_interest` logs buying intent and the agent replies "I've notified our
+team and they will call you shortly." A D365 Service Activity (`serviceappointment`) is
+**not** used: its `regardingobjectid` cannot target the custom EF tables, and records do
+not persist in this org because Service Scheduling is not provisioned. The work item goes
+on tables that do link — a `Query` service request for a known customer, the lead record
+otherwise.
+
+### Brochure
+
+`send_offer_brochure` uploads `eureka-forbes-offer-brochure.pdf` once, caches the media id
+for 25 days (Meta expires them at 30), and sends it as a document. The cache key includes
+the sending number, because a media id is scoped to the number that uploaded it. The prompt
+forbids describing the contents — the agent has not read it.
+
+### Demoing it
+
+`scripts/demo.py` runs the flows in a terminal against the real agent, real prompt,
+real tools and real Dataverse — everything except the WhatsApp transport. An expired
+token, a dead tunnel or a template still in review cannot spoil it.
+
+```bash
+.venv/bin/python scripts/demo.py --list
+.venv/bin/python scripts/demo.py renewal --slow     # types at reading pace
+.venv/bin/python scripts/demo.py --all --slow
+```
+
+Each scenario prints the conversation and then what reached the CRM. It creates real
+records — clean up with `scripts/cleanup_test_records.py` afterwards.
+
+Live WhatsApp demos additionally need: a **System User** token (the API Setup token
+expires in ~24h and dies mid-demo), a tunnel URL that matches what is saved in Meta,
+and — for proactive reminders — approved templates.

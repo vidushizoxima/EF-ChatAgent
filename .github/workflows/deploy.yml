@@ -1,0 +1,134 @@
+name: Build & Deploy to Azure App Service
+
+# Every push to main builds the Dockerfile, publishes it to GHCR, and repoints the
+# App Service at the new SHA-tagged image.
+#
+# Two things about this app differ from a stateless API and are enforced below:
+#   · session state is a SQLite file, so it must live on /home (persistent) and the
+#     app must run on exactly ONE instance
+#   · the interaction logger is a background task, so Always On must stay enabled
+# Neither is set by this workflow — see DEPLOY.md for the one-time az commands.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '.env.example'
+      - 'tests/**'
+  workflow_dispatch:
+
+env:
+  # ── EDIT THIS ─────────────────────────────────────────────────────
+  AZURE_WEBAPP_NAME: ef-chat-agent
+  # ──────────────────────────────────────────────────────────────────
+  # The hostname is NOT hard-coded: new App Services get a randomised suffix, so
+  # it is read from the deploy action's own output below.
+  AZURE_HEALTH_PATH: /health
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & push image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # GHCR rejects uppercase paths; repo names often have capitals.
+      - name: Resolve lowercase image path
+        id: meta
+        run: echo "image=${REGISTRY}/${IMAGE_NAME,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          provenance: false          # App Service pulls plain manifests, not attestation indexes
+          tags: |
+            ${{ steps.meta.outputs.image }}:latest
+            ${{ steps.meta.outputs.image }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to App Service
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.webapp-url }}
+    steps:
+      - name: Deploy container
+        id: deploy
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          images: ${{ needs.build.outputs.image }}:${{ github.sha }}
+
+      # A hand-copied hostname goes stale the moment the app is recreated, and the
+      # health gate then fails against a host that no longer exists. Take it from the
+      # deploy step; fall back to the default form only if the action returned nothing.
+      - name: Resolve health URL
+        id: url
+        env:
+          WEBAPP_URL: ${{ steps.deploy.outputs.webapp-url }}
+        run: |
+          base="${WEBAPP_URL:-https://${AZURE_WEBAPP_NAME}.azurewebsites.net}"
+          base="${base%/}"
+          echo "health=${base}${AZURE_HEALTH_PATH}" >> "$GITHUB_OUTPUT"
+          echo "Health URL: ${base}${AZURE_HEALTH_PATH}"
+
+      # A container cold start takes a while; poll instead of trusting the
+      # control plane's response.
+      - name: Wait for /health
+        env:
+          HEALTH_URL: ${{ steps.url.outputs.health }}
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$HEALTH_URL" || echo 000)
+            echo "attempt $i -> $code"
+            if [ "$code" = "200" ]; then
+              echo "::notice::$HEALTH_URL is healthy"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$HEALTH_URL never returned 200 (last: $code)"
+          exit 1
+
+      # A green deploy that lost its CRM or channel credentials is worse than a
+      # failed one — it answers customers with nothing behind it.
+      - name: Verify wiring
+        env:
+          HEALTH_URL: ${{ steps.url.outputs.health }}
+        run: |
+          body=$(curl -s --max-time 15 "$HEALTH_URL")
+          echo "$body"
+          echo "$body" | grep -q '"dataverse_configured": *true' \
+            || echo "::warning::Dataverse is not configured — CRM tools will fail"
+          for ch in whatsapp facebook instagram; do
+            echo "$body" | grep -q "\"$ch\": *true" \
+              || echo "::warning::$ch credentials missing — replies will not send"
+          done

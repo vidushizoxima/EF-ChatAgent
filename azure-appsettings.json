@@ -1,0 +1,46 @@
+[
+  { "name": "WEBSITES_PORT",                      "value": "8000",  "slotSetting": false },
+  { "name": "PORT",                               "value": "8000",  "slotSetting": false },
+  { "name": "WEBSITES_ENABLE_APP_SERVICE_STORAGE","value": "true",  "slotSetting": false },
+  { "name": "WEBSITES_CONTAINER_START_TIME_LIMIT","value": "600",   "slotSetting": false },
+
+  { "name": "APP_ENV",                            "value": "production", "slotSetting": false },
+  { "name": "LOG_LEVEL",                          "value": "INFO",  "slotSetting": false },
+  { "name": "ADMIN_API_KEY",                      "value": "<generate-a-long-random-string>", "slotSetting": false },
+
+  { "name": "EF_DB_PATH",                         "value": "/home/data/ef_chat.db", "slotSetting": false },
+  { "name": "SESSION_TTL_DAYS",                   "value": "2",     "slotSetting": false },
+  { "name": "SUMMARY_BATCH_SIZE",                 "value": "5",     "slotSetting": false },
+
+  { "name": "LLM_PROVIDER",                       "value": "azure_openai", "slotSetting": false },
+  { "name": "AZURE_LLM_ENDPOINT",                 "value": "https://bislerivansales.cognitiveservices.azure.com/openai/v1", "slotSetting": false },
+  { "name": "AZURE_LLM_API_KEY",                  "value": "<azure-openai-key>", "slotSetting": false },
+  { "name": "AZURE_LLM_MODEL",                    "value": "gpt-5.6-sol", "slotSetting": false },
+  { "name": "MAX_OUTPUT_TOKENS",                  "value": "4096",  "slotSetting": false },
+
+  { "name": "INTERACTION_IDLE_SECONDS",           "value": "120",   "slotSetting": false },
+  { "name": "INTERACTION_SCAN_SECONDS",           "value": "30",    "slotSetting": false },
+  { "name": "INTERACTION_ORPHAN_HOURS",           "value": "24",    "slotSetting": false },
+
+  { "name": "DATAVERSE_URL",                      "value": "https://eurekaforbesdemo.crm8.dynamics.com", "slotSetting": false },
+  { "name": "DATAVERSE_TENANT_ID",                "value": "<tenant-id>", "slotSetting": false },
+  { "name": "DATAVERSE_CLIENT_ID",                "value": "<client-id>", "slotSetting": false },
+  { "name": "DATAVERSE_CLIENT_SECRET",            "value": "<client-secret>", "slotSetting": false },
+  { "name": "DATAVERSE_API_VERSION",              "value": "v9.2",  "slotSetting": false },
+
+  { "name": "BRAND_NAME",                         "value": "Eureka Forbes", "slotSetting": false },
+  { "name": "AGENT_NAME",                         "value": "Asha", "slotSetting": false },
+  { "name": "SUPPORT_NUMBER",                     "value": "+918049280357", "slotSetting": false },
+
+  { "name": "WHATSAPP_TOKEN",                     "value": "<whatsapp-token>", "slotSetting": false },
+  { "name": "WHATSAPP_PHONE_NUMBER_ID",           "value": "<phone-number-id>", "slotSetting": false },
+  { "name": "WHATSAPP_VERIFY_TOKEN",              "value": "<verify-token>", "slotSetting": false },
+
+  { "name": "FACEBOOK_PAGE_ACCESS_TOKEN",         "value": "<page-access-token>", "slotSetting": false },
+  { "name": "FACEBOOK_PAGE_ID",                   "value": "1275085085680598", "slotSetting": false },
+  { "name": "FACEBOOK_VERIFY_TOKEN",              "value": "<verify-token>", "slotSetting": false },
+
+  { "name": "INSTAGRAM_PAGE_ACCESS_TOKEN",        "value": "<ig-access-token>", "slotSetting": false },
+  { "name": "INSTAGRAM_ACCOUNT_ID",               "value": "<ig-business-account-id>", "slotSetting": false },
+  { "name": "INSTAGRAM_VERIFY_TOKEN",             "value": "<verify-token>", "slotSetting": false }
+]

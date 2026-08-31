@@ -1,0 +1,29 @@
+# Build context hygiene — .venv alone is ~88 MB
+**/.venv/
+**/venv/
+**/__pycache__/
+**/*.py[cod]
+
+# Secrets stay in App Service settings, never in the image
+.env
+**/*.publishsettings
+**/publish-profile.xml
+
+# Local session store — contains real conversation transcripts.
+# The ** prefix matters: a bare *.db matches only the context root, so
+# chatbot/data/ef_chat.db would otherwise be baked into the image.
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/data/
+**/logs/
+
+# Not needed at runtime.
+# NOTE: prompts/*.md and ef_schema_reference.json MUST ship — the agent cannot
+# start without them — so docs are excluded by name rather than by a *.md rule.
+.git/
+.github/
+tests/
+README.md
+DEPLOY.md
+**/.DS_Store
