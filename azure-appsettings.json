@@ -21,6 +21,8 @@
   { "name": "INTERACTION_IDLE_SECONDS",           "value": "120",   "slotSetting": false },
   { "name": "INTERACTION_SCAN_SECONDS",           "value": "30",    "slotSetting": false },
   { "name": "INTERACTION_ORPHAN_HOURS",           "value": "24",    "slotSetting": false },
+  { "name": "COST_PER_1K_INPUT",                 "value": "",      "slotSetting": false },
+  { "name": "COST_PER_1K_OUTPUT",                "value": "",      "slotSetting": false },
 
   { "name": "DATAVERSE_URL",                      "value": "https://eurekaforbesdemo.crm8.dynamics.com", "slotSetting": false },
   { "name": "DATAVERSE_TENANT_ID",                "value": "<tenant-id>", "slotSetting": false },
@@ -41,6 +43,21 @@
   { "name": "FACEBOOK_VERIFY_TOKEN",              "value": "<verify-token>", "slotSetting": false },
 
   { "name": "INSTAGRAM_PAGE_ACCESS_TOKEN",        "value": "<ig-access-token>", "slotSetting": false },
-  { "name": "INSTAGRAM_ACCOUNT_ID",               "value": "<ig-business-account-id>", "slotSetting": false },
-  { "name": "INSTAGRAM_VERIFY_TOKEN",             "value": "<verify-token>", "slotSetting": false }
+  { "name": "INSTAGRAM_ACCOUNT_ID",               "value": "17841443853703974", "slotSetting": false },
+  { "name": "INSTAGRAM_VERIFY_TOKEN",             "value": "<verify-token>", "slotSetting": false },
+  { "name": "SUMMARY_TIMEOUT_SECONDS",           "value": "15",    "slotSetting": false },
+  { "name": "SUMMARY_MODEL",                     "value": "",      "slotSetting": false },
+  { "name": "LLM_TEMPERATURE",                   "value": "",      "slotSetting": false },
+
+  { "name": "WHATSAPP_WABA_ID",                  "value": "<waba-id>", "slotSetting": false },
+
+  { "name": "AMC_REMINDERS_ENABLED",             "value": "false", "slotSetting": false },
+  { "name": "AMC_REMINDER_HOUR_IST",             "value": "12",    "slotSetting": false },
+  { "name": "AMC_REMINDER_MINUTE_IST",           "value": "0",     "slotSetting": false },
+  { "name": "AMC_REMINDER_MAX_PER_RUN",          "value": "200",   "slotSetting": false },
+  { "name": "AMC_REMINDER_SPACING_SECONDS",      "value": "1.0",   "slotSetting": false },
+  { "name": "AMC_RENEWAL_OFFER_PCT",             "value": "10",    "slotSetting": false },
+  { "name": "AMC_REMINDER_ALLOWLIST",            "value": "",      "slotSetting": false },
+  { "name": "AMC_REMINDER_ALLOW_FULL_CRM",       "value": "false", "slotSetting": false },
+  { "name": "AMC_PRICES_CONFIRMED",              "value": "false", "slotSetting": false }
 ]
