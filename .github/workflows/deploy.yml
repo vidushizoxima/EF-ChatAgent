@@ -20,7 +20,7 @@ on:
 
 env:
   # ── EDIT THIS ─────────────────────────────────────────────────────
-  AZURE_WEBAPP_NAME: ef-chat-agent
+  AZURE_WEBAPP_NAME: EurekaForbes-Chat
   # ──────────────────────────────────────────────────────────────────
   # The hostname is NOT hard-coded: new App Services get a randomised suffix, so
   # it is read from the deploy action's own output below.

@@ -21,20 +21,38 @@ never runs. **Always On is required**, not optional.
 
 ---
 
-## 1. Create the App Service (one time)
+## 1. The App Service
+
+The app already exists — it is **`EurekaForbes-Chat`** in resource group
+`Eureka-forbes-demo`, on the shared `ASP-goedai-850d` plan (B3, capacity 1). That name
+is what `AZURE_WEBAPP_NAME` in `deploy.yml` must say; there is no `ef-chat-agent`.
 
 ```bash
-RG=eureka-forbes-rg
-PLAN=ef-chat-plan
-APP=ef-chat-agent                 # must match AZURE_WEBAPP_NAME in deploy.yml
-LOC=centralindia
+RG=Eureka-forbes-demo
+APP=EurekaForbes-Chat             # must match AZURE_WEBAPP_NAME in deploy.yml
 IMG=ghcr.io/vidushizoxima/ef-chatagent:latest
+```
+
+It was originally created as a Python *code* app, so it had to be switched to a
+container app before `azure/webapps-deploy` could push an image to it:
+
+```bash
+az webapp config container set -n $APP -g $RG \
+  --container-image-name $IMG --container-registry-url https://ghcr.io
+
+# the Dockerfile CMD runs the app; a leftover startup command would shadow it
+az webapp config set -n $APP -g $RG --generic-configurations '{"appCommandLine": ""}'
+```
+
+To create one from scratch instead:
+
+```bash
+PLAN=ef-chat-plan
+LOC=southindia
 
 az group create -n $RG -l $LOC
-
 # B1 is enough — one instance, no fleet of subprocesses. Always On needs B1+, not F1.
 az appservice plan create -n $PLAN -g $RG --is-linux --sku B1 -l $LOC
-
 az webapp create -n $APP -g $RG -p $PLAN --container-image-name $IMG
 ```
 
@@ -137,7 +155,7 @@ curl -s https://<hostname>/health | python3 -m json.tool
 curl -s -H "X-Admin-API-Key: $ADMIN_API_KEY" https://<hostname>/admin/diagnostics
 
 # live logs
-az webapp log tail -n ef-chat-agent -g eureka-forbes-rg
+az webapp log tail -n EurekaForbes-Chat -g Eureka-forbes-demo
 ```
 
 `/health` reporting `"facebook": false` or `"dataverse_configured": false` means an app
