@@ -560,7 +560,15 @@ async def ensure_customer(name: str, phone: str, lead_id: Optional[str] = None) 
     that matters here, so we create the record rather than turning them away.
 
     Idempotent: a matching phone returns the existing record instead of a duplicate.
+
+    Refuses a blank or malformed number. `_phone_filter` returns nothing for one, so
+    the search silently finds no match and we would create a fresh customer with
+    ef_phone="" — a record the service team cannot act on and the next conversation
+    cannot find, producing a second one. Better to fail loudly here.
     """
+    if len(normalise_phone(phone)) != 10:
+        raise ValueError(f"ensure_customer needs a 10-digit phone, got {phone!r}")
+
     existing = await _search("ef_customer", CUSTOMER_SELECT, phone)
     if existing:
         record = existing[0]

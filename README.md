@@ -445,9 +445,11 @@ true  → "1-year AMC: ₹2,249 after 10% off. 2-year AMC: ₹4,049. 2-year CMC:
 
 Replace the figures with EF's real card rates before flipping the flag.
 
-**Payment never happens in chat.** The agent is forbidden from sending a payment link
-or asking for card/UPI details, and from saying a renewal is active — it is logged,
-and the team completes it.
+**Payment happens through one link, or not at all.** `STRIPE_PAYMENT_LINK` is injected
+into the WhatsApp prompt as `{{payment_link}}`; unset, the agent is told there is no
+link and instructed not to invent one, which is the pre-existing behaviour. The agent
+may never ask for card/UPI details itself, and may never say a renewal is active on
+the strength of having sent the link — it is active when the payment clears.
 
 **Escalation is not a failure.** `escalate_to_human` sets the Escalated disposition
 and records the reason, tells the customer someone will call, and offers the support

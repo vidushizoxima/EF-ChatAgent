@@ -29,6 +29,21 @@ from client import offers
 from client.config import BRAND_NAME, AGENT_NAME, SUPPORT_NUMBER, create_chat_llm, supports_prompt_caching
 
 
+def _payment_block() -> str:
+    """The renewal payment link, or an explicit 'there isn't one'."""
+    if not offers.PAYMENT_LINK:
+        return (
+            "There is NO payment link available. Do not send one, do not invent a URL, "
+            "and do not ask for card or UPI details — tell them our team will call to "
+            "take payment."
+        )
+    return (
+        f"The renewal payment link is {offers.PAYMENT_LINK} — send it as plain text, "
+        f"exactly as written. Never ask for card, UPI or bank details yourself, and "
+        f"never say the renewal is active until the payment has actually gone through."
+    )
+
+
 def _offer_block() -> str:
     """The live campaign, as the agent should hear it — or an explicit 'nothing on'."""
     if not offers.is_live():
@@ -200,6 +215,7 @@ Do NOT ask for anything already listed above.""")
             # every conversation, and it goes stale on its own end date without anyone
             # editing the prompt.
             "current_offer": _offer_block(),
+            "payment_link": _payment_block(),
             "current_date": current_date_str,
             "current_time": current_time_str,
             "channel": channel,

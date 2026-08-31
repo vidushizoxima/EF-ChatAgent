@@ -558,6 +558,18 @@ async def purge():
     return SessionStore.purge_expired()
 
 
+@app.post("/admin/reset", dependencies=[Depends(verify_admin_api_key)])
+async def reset(everything: bool = False):
+    """Wipe every conversation so the next message starts fresh. For demos.
+
+    `/admin/purge` only drops sessions past the TTL, so it will not clear a chat
+    from ten minutes ago — this does. The AMC send-history survives by default so a
+    reset cannot cause a real customer to be reminded twice; `?everything=true`
+    drops that too.
+    """
+    return SessionStore.reset_all(everything=everything)
+
+
 if __name__ == "__main__":
     import uvicorn
 

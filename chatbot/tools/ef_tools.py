@@ -553,6 +553,19 @@ async def register_purchase_interest(
     record_id = store.get("crm_record_id")
     outcome = {"status": "success", "interest": interest}
 
+    # Same Facebook/Instagram trap as raise_service_request: with no CRM record to
+    # fall back on, the lead below is created from `info` alone, and on those
+    # channels `info` carries a Meta profile name but no phone. "Our team will call
+    # you shortly" then goes to a record with no number on it.
+    if not record_id and len(ef_crm.normalise_phone(info.get("phone") or "")) != 10:
+        return json.dumps({
+            "status": "need_phone",
+            "message": (
+                "Ask for their 10-digit phone number first — the team cannot call them back "
+                "without it, so do not promise that they will."
+            ),
+        })
+
     # A D365 Service Activity (serviceappointment) cannot be bound to ef_customer —
     # the custom EF tables are not valid regardingobjectid targets, and records do
     # not persist in this org because Service Scheduling is not provisioned. So the
@@ -767,6 +780,20 @@ async def raise_service_request(
             return json.dumps({
                 "status": "need_name",
                 "message": "Ask for their name first — a service record cannot be created without one.",
+            })
+        # On Facebook and Instagram the webhook seeds `name` from the Meta profile
+        # before a word is exchanged, so the name check above passes with no phone
+        # behind it. ensure_customer would then write ef_phone="" — either Dataverse
+        # rejects it and the customer is told the booking errored, or it succeeds and
+        # we have promised an engineer to someone nobody can ring back. Ask instead.
+        if len(ef_crm.normalise_phone(info.get("phone") or "")) != 10:
+            return json.dumps({
+                "status": "need_phone",
+                "message": (
+                    "Ask for their 10-digit phone number before logging this — the technician "
+                    "has no way to reach them without it. Give them a reason: it is how the "
+                    "engineer confirms the visit."
+                ),
             })
         try:
             made = await ef_crm.ensure_customer(

@@ -472,6 +472,40 @@ class SessionStore:
 
     # ==================== MAINTENANCE ====================
 
+    # kv rows keyed by these namespaces are NOT conversation state, so a demo reset
+    # leaves them alone: amc:* is the record of which reminders have already gone out
+    # to real customers — drop it and the next run messages them a second time — and
+    # wa:media caches the uploaded brochure id, which costs a 1 MB re-upload to lose.
+    KEEP_NAMESPACES = ("amc:sent", "amc:optout", "amc:lastsent", "wa:media")
+
+    @staticmethod
+    def reset_all(everything: bool = False) -> Dict[str, int]:
+        """Delete every conversation — sessions, messages and their kv rows.
+
+        For demos: afterwards the next message on any channel starts from nothing.
+        Unlike `purge_expired` this ignores the TTL, so a chat from a minute ago goes
+        too. `everything=True` additionally drops KEEP_NAMESPACES; only use it when
+        you also want the AMC send-history forgotten.
+        """
+        msgs = SqlitePool.execute("DELETE FROM messages")
+        sess = SqlitePool.execute("DELETE FROM sessions")
+        if everything:
+            kv = SqlitePool.execute("DELETE FROM kv")
+        else:
+            holes = ",".join("?" * len(SessionStore.KEEP_NAMESPACES))
+            kv = SqlitePool.execute(
+                f"DELETE FROM kv WHERE session_id NOT IN ({holes})",
+                SessionStore.KEEP_NAMESPACES,
+            )
+        result = {
+            "sessions_deleted": max(sess.rowcount, 0),
+            "messages_deleted": max(msgs.rowcount, 0),
+            "kv_deleted": max(kv.rowcount, 0),
+            "amc_state_kept": not everything,
+        }
+        logger.warning(f"🧨 Full reset: {result}")
+        return result
+
     @staticmethod
     def purge_expired() -> Dict[str, int]:
         """Delete expired kv rows and sessions idle beyond the TTL."""

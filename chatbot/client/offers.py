@@ -42,6 +42,11 @@ TERMS = [
 # the offer is the same either way.
 APPLIES_TO_EVERYTHING = True
 
+# Stripe payment link for AMC renewals. Empty until STRIPE_PAYMENT_LINK is set, and
+# the agent is then told there is no link rather than left to improvise one — the same
+# fail-closed shape as an expired campaign.
+PAYMENT_LINK = os.getenv("STRIPE_PAYMENT_LINK", "").strip()
+
 BROCHURE_PATH = os.getenv(
     "OFFER_BROCHURE_PATH",
     os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
