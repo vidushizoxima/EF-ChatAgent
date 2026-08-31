@@ -17,6 +17,7 @@ import datetime as _dt
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, Optional
 
 from langchain.agents import create_agent
@@ -42,6 +43,17 @@ def _payment_block() -> str:
         f"exactly as written. Never ask for card, UPI or bank details yourself, and "
         f"never say the renewal is active until the payment has actually gone through."
     )
+
+
+# A greeting and nothing else. Deliberately strict: "hi" alone, any case, with or
+# without trailing punctuation — not "hi there", not "hello", not "hi, my purifier is
+# leaking". A message carrying any actual content is that content's problem, and
+# opening it with a payment link would talk over whatever they came to say.
+_BARE_HI = re.compile(r"^\s*hi\s*[!.?,…]*\s*$", re.IGNORECASE)
+
+
+def is_bare_hi(text: str) -> bool:
+    return bool(_BARE_HI.match(text or ""))
 
 
 def _offer_block() -> str:
@@ -180,6 +192,13 @@ Do NOT ask for anything already listed above.""")
             volatile_parts.append(
                 "FLOW HINT: your last message was a question. A short reply is the answer to it — "
                 "acknowledge briefly and move on, do not repeat the question or start a new search."
+            )
+
+        # ── Greeting pitch: they said "hi" and nothing else ──
+        if store.get("bare_hi_turn"):
+            volatile_parts.append(
+                "GREETING TRIGGER: their message was exactly \"hi\", nothing more. "
+                "Follow the 'A bare hi' rule in your instructions for this reply only."
             )
 
         # ── House rules ──
@@ -424,6 +443,13 @@ async def process_query(query: str, session_id: str, channel: str = "whatsapp", 
     )
 
     await store.add_message("user", query)
+
+    # Drives the "A bare hi" rule in the prompt. Set per turn, not per session: the
+    # pitch fires on the greeting and must not linger over the next message.
+    if is_bare_hi(query):
+        store.set("bare_hi_turn", "1", ttl=300)
+    else:
+        store.delete("bare_hi_turn")
 
     full_response = ""
     yielded_text = ""
