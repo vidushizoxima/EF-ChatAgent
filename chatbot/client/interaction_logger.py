@@ -95,13 +95,18 @@ async def _classify(transcript: str, store: SessionStore) -> Dict[str, Any]:
     prompt = (
         "You are classifying a finished customer-service conversation for a CRM.\n"
         "Return ONLY a JSON object, no prose, with exactly these keys:\n"
-        '  "summary": what the customer wanted and what was done, third person, under 150 words\n'
+        '  "summary": what the customer wanted and what was done, third person, under 150 words. '
+        'WRITE IT IN ENGLISH even when the conversation was in Hindi, Hinglish, Tamil or any '
+        'other language — translate rather than transcribe. Nobody reading this row in the CRM '
+        'has the transcript, and a summary they cannot read is the same as no summary. Keep '
+        'product names, model numbers and case numbers exactly as they appear.\n'
         '  "intent": one snake_case label, e.g. service_complaint, amc_enquiry, new_purchase, '
         'product_info, filter_change, order_status, other\n'
         '  "sentiment": number from -1 (angry) to 1 (delighted)\n'
         f'  "disposition": one of {sorted(VALID_DISPOSITIONS)}\n'
         '  "escalated": true if the customer was handed off to a human or asked for one\n'
-        '  "product": the product or model discussed, or "" if none\n\n'
+        '  "product": the product or model discussed, or "" if none. English, as the catalogue '
+        'spells it\n\n'
         "Disposition guidance: Resolved = their problem was answered or logged; "
         "Interested = they want something but did not commit; Qualified = a genuine "
         "sales lead with contact details; Engaged = a normal exchange with no clear "
@@ -199,9 +204,17 @@ async def flush_session(session: Dict[str, Any]) -> Optional[str]:
             pass
 
     body = classified.get("summary") or transcript
+
+    # What the conversation actually produced in the CRM. The summary is written by a
+    # model and may or may not mention these; the case number especially is how anyone
+    # picks the work up later, so it is appended rather than hoped for.
+    case = store.get("case_number")
     booked = store.get("visit_booked")
+    if case:
+        body = f"{body}\n\nService request {case} raised."
     if booked:
-        body = f"{body}\n\nTechnician visit booked for {booked}."
+        body = f"{body}\n\nTechnician visit booked for {booked}." if not case \
+            else f"{body} Technician visit booked for {booked}."
 
     # Attribution and objection are the two things you cannot recover later by
     # re-reading the transcript at scale, so they go in as structured-ish text

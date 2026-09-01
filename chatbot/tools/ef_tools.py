@@ -760,8 +760,11 @@ async def raise_service_request(
     call `book_service_visit` once they pick one.
 
     Args:
-        issue: what is wrong, in one line, in their words.
-        category: short label, e.g. "Water taste", "Not working", "Consumable replacement".
+        issue: what is wrong, in one line. Write it in ENGLISH even if they said it in
+            Hindi or Hinglish — it lands in the case record, which the service team reads.
+        category: short label, in English, e.g. "Water taste", "Not working",
+            "Consumable replacement". This is the only free text on the case (80 chars),
+            so make it say what is actually wrong.
         priority: Low, Medium or High. Use High only if there is no water at all or a leak.
         visit_date: the day they chose — "tomorrow", "Monday", or 2026-08-25.
         visit_slot: the window they chose — morning, afternoon or evening.
